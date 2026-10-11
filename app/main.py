@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import create_tables, get_session
 from app.models import Tariff, Payment
 from app.schemas import PaymentCreate, PaymentOut, TariffOut, WebhookIn
-from app.services import build_schedule, can_transition, calc_discount, promo_is_valid
+from app.services import build_schedule, can_transition, calc_discount, promo_percent
 
 # Тарифы создаются при старте приложения. Цены в копейках.
 TARIFFS = [
@@ -75,9 +75,10 @@ async def create_payment(
 
     discount = 0
     if body.promo_code is not None:
-        if not promo_is_valid(body.promo_code):
+        percent = promo_percent(body.promo_code)
+        if percent is None:
             raise HTTPException(status_code=422, detail="unknown promo_code")
-        discount = calc_discount(tariff.price)
+        discount = calc_discount(tariff.price, percent)
 
     amount = tariff.price - discount
     schedule = None

@@ -3,7 +3,7 @@
 Вся арифметика идёт в копейках целыми числами, поэтому результат всегда
 сходится до копейки и не зависит от ошибок округления float.
 """
-from app.schemas import PROMO_DISCOUNT_PERCENT, PROMO_CODE
+from app.schemas import PROMO_CODES
 
 # Разрешённые переходы статусов платежа.
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
@@ -14,18 +14,18 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
 }
 
 
-def promo_is_valid(promo_code: str) -> bool:
-    """Промокод сравнивается без учёта регистра и лишних пробелов."""
-    return promo_code.strip().upper() == PROMO_CODE
+def promo_percent(promo_code: str) -> int | None:
+    """Процент скидки по промокоду или None, если код неизвестен."""
+    return PROMO_CODES.get(promo_code.strip().upper())
 
 
-def calc_discount(price: int) -> int:
-    """Скидка 10 процентов от цены тарифа, в копейках, с округлением вниз.
+def calc_discount(price: int, percent: int) -> int:
+    """Скидка от цены тарифа, в копейках, с округлением вниз.
 
     Для тарифов из задания деление точное, но округление вниз оставлено
     на случай других сумм: клиент не должен получить скидку больше положенной.
     """
-    return price * PROMO_DISCOUNT_PERCENT // 100
+    return price * percent // 100
 
 
 def build_schedule(amount: int, months: int) -> list[int]:

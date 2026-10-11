@@ -8,9 +8,9 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 PaymentMethod = Literal["card", "sbp", "installment"]
 # Допустимые сроки рассрочки.
 InstallmentMonths = Literal[3, 6, 12]
-# Промокод, который даёт скидку 10 процентов.
-PROMO_CODE = "KVITTO10"
-PROMO_DISCOUNT_PERCENT = 10
+# Соответствие промокода и процента скидки: коды пишем в верхнем регистре,
+# поэтому сравнение не зависит от регистра ввода.
+PROMO_CODES: dict[str, int] = {"KVITTO10": 10}
 
 
 class TariffOut(BaseModel):
