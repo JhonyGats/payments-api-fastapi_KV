@@ -1,13 +1,15 @@
 """Общие фикстуры тестов.
 
-Каждый тест работает со своей временной базой SQLite, поэтому тесты
-не зависят друг от друга и не трогают рабочую базу приложения.
+Тесты ходят в приложение асинхронным клиентом httpx через ASGITransport:
+запрос идёт прямо в ASGI-приложение, сервер на порту не поднимается.
+База своя, временная, рабочая база приложения не затрагивается.
 """
 import os
 import tempfile
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 
 # Строку подключения нужно задать до импорта приложения: движок создаётся
@@ -17,28 +19,46 @@ if _tmp_db.exists():
     _tmp_db.unlink()
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_tmp_db.as_posix()}"
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from app.main import app  # noqa: E402
+from app.database import SessionLocal, create_tables, engine  # noqa: E402
+from app.main import TARIFFS, app  # noqa: E402
+from app.models import Tariff  # noqa: E402
 
 
 @pytest.fixture(scope="session")
-def client():
-    """Клиент API. TestClient построен на httpx и поднимает приложение целиком."""
-    with TestClient(app) as test_client:
-        yield test_client
+def anyio_backend():
+    """Тесты идут только на asyncio, trio в проекте не используется."""
+    return "asyncio"
 
-    # После закрытия приложения освобождаем файл базы: на Windows он занят,
-    # пока живо соединение движка.
-    from app.database import engine
 
-    try:
-        import asyncio
+async def _prepare_database():
+    """Создаёт таблицы и наполняет справочник тарифов.
 
-        asyncio.run(engine.dispose())
-    except Exception:  # pragma: no cover - уборка не должна ломать прогон
-        pass
+    При ASGITransport событие lifespan приложения не выполняется, поэтому
+    подготовку базы делаем теми же вызовами, что и приложение при старте.
+    """
+    await create_tables()
+    async with SessionLocal() as session:
+        for item in TARIFFS:
+            if await session.get(Tariff, item["id"]) is None:
+                session.add(Tariff(**item))
+        await session.commit()
 
+
+@pytest.fixture
+async def client():
+    """Асинхронный клиент httpx, направленный прямо в ASGI-приложение."""
+    await _prepare_database()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as async_client:
+        yield async_client
+    # Закрываем соединения: на Windows файл базы занят, пока живо соединение движка.
+    await engine.dispose()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_database():
+    """Убирает временный файл базы после прогона тестов."""
+    yield
     for _ in range(10):
         try:
             if _tmp_db.exists():
@@ -48,7 +68,7 @@ def client():
             time.sleep(0.2)
 
 
-def create_payment(client, **overrides):
+async def create_payment(client, **overrides):
     """Вспомогательная функция: создаёт платёж с разумными значениями по умолчанию."""
     payload = {
         "tariff_id": "standard",
@@ -59,4 +79,4 @@ def create_payment(client, **overrides):
     headers = {}
     if "idempotency_key" in payload:
         headers["Idempotency-Key"] = payload.pop("idempotency_key")
-    return client.post("/payments", json=payload, headers=headers)
+    return await client.post("/payments", json=payload, headers=headers)
